@@ -33,6 +33,8 @@ understand every step along the way.
 
 ## Blocks
 
+**Progress:** Block 0 ✅ (live at https://sipat-jade.vercel.app) · Block 1 ✅ ([notes](blocks/block-1.md))
+
 | # | Block | What we build | What you learn | How Jest checks it |
 |---|---|---|---|---|
 | 0 | **Skeleton that ships** | Empty app, Jest set up, one test, CI, deployed | Ship on day one so every later block goes live | A sample test passes locally and in CI |
