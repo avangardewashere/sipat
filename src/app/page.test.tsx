@@ -8,9 +8,10 @@ describe("Home page", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Sipat" })).toBeInTheDocument();
   });
 
-  it("shows a 25-minute focus timer ready to start", () => {
+  it("starts on a 25-minute focus session, ready to start", () => {
     render(<Home />);
 
+    expect(screen.getByRole("heading", { level: 2, name: "Focus" })).toBeInTheDocument();
     expect(screen.getByRole("timer")).toHaveTextContent("25:00");
     expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
   });
