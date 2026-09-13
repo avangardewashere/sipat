@@ -15,6 +15,8 @@ export type PhaseCompletion = {
   seq: number;
   phase: Phase;
   durationMs: number;
+  /** When the phase was first started. Resuming after a pause doesn't move it. */
+  startedAt: number;
   /** The real moment time ran out (see Block 1). */
   finishedAt: number;
 };
@@ -25,6 +27,8 @@ export type PomodoroState = {
   /** Focus sessions run to completion since the app opened. */
   completedFocus: number;
   timer: TimerState;
+  /** When the current phase was first started; null until it is. (The timer only remembers its latest run.) */
+  phaseStartedAt: number | null;
   lastCompletion: PhaseCompletion | null;
 };
 
@@ -42,6 +46,7 @@ export function createPomodoro(settings: PomodoroSettings): PomodoroState {
     phase: "focus",
     completedFocus: 0,
     timer: createTimer(phaseDurationMs("focus", settings)),
+    phaseStartedAt: null,
     lastCompletion: null,
   };
 }
@@ -60,7 +65,13 @@ function advance(state: PomodoroState, completed: boolean): PomodoroState {
     next = "focus";
   }
 
-  return { ...state, phase: next, completedFocus, timer: createTimer(phaseDurationMs(next, settings)) };
+  return {
+    ...state,
+    phase: next,
+    completedFocus,
+    timer: createTimer(phaseDurationMs(next, settings)),
+    phaseStartedAt: null,
+  };
 }
 
 export function pomodoroReducer(state: PomodoroState, action: PomodoroAction): PomodoroState {
@@ -72,16 +83,24 @@ export function pomodoroReducer(state: PomodoroState, action: PomodoroAction): P
       const timer = timerReducer(state.timer, action);
       if (timer === state.timer) return state;
 
+      const phaseStartedAt =
+        timer.status === "idle"
+          ? null // reset
+          : action.type === "start" && state.timer.status === "idle"
+            ? action.now // the very first start of this phase
+            : state.phaseStartedAt;
+
       if (timer.status === "finished") {
         const completion: PhaseCompletion = {
           seq: (state.lastCompletion?.seq ?? 0) + 1,
           phase: state.phase,
           durationMs: timer.durationMs,
+          startedAt: phaseStartedAt ?? timer.finishedAt - timer.durationMs,
           finishedAt: timer.finishedAt,
         };
         return { ...advance(state, true), lastCompletion: completion };
       }
-      return { ...state, timer };
+      return { ...state, timer, phaseStartedAt };
     }
 
     case "skip":

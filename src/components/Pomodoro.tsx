@@ -1,13 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import { SessionLog } from "@/components/SessionLog";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { useCompletionEffect } from "@/hooks/useCompletionEffect";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { usePomodoro } from "@/hooks/usePomodoro";
+import { useStoredData } from "@/hooks/useStoredData";
 import { browserAlerts, type Alerts, type PermissionResult } from "@/lib/alerts/browser";
 import { completionMessage, filledDots, sessionNumber } from "@/lib/pomodoro/pomodoro";
+import type { Preferences } from "@/lib/pomodoro/preferences";
 import { DEFAULT_SETTINGS, PHASE_LABEL, type Phase, type PomodoroSettings } from "@/lib/pomodoro/settings";
+import { mergeSessions, sessionFromCompletion, type FocusSession } from "@/lib/sessions/session";
+import { browserRepository, type SipatRepository } from "@/lib/storage/repository";
 import { formatRemaining } from "@/lib/timer/format";
 import type { TimerStatus } from "@/lib/timer/timer";
 
@@ -42,18 +47,31 @@ const PERMISSION_NOTICE: Record<Exclude<PermissionResult, "granted">, string> = 
 const NOTIFY_FAILED_NOTICE =
   "This browser only shows notifications for installed apps, so you'll get sound and vibration instead.";
 
+const STORAGE_FAILED_NOTICE =
+  "Couldn't save to this browser's storage (it may be full or blocked). New sessions and settings will be lost when you close this tab.";
+
 const buttonBase =
   "h-12 min-w-24 rounded-full px-6 text-base font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:cursor-not-allowed disabled:opacity-40";
 const primaryButton = `${buttonBase} bg-foreground text-background hover:opacity-90`;
 const secondaryButton = `${buttonBase} border border-foreground/20 hover:bg-foreground/5 disabled:hover:bg-transparent`;
 
 type Props = {
+  /** Used until saved settings load, and whenever nothing has been saved yet. */
   initialSettings?: PomodoroSettings;
   /** The time's-up side effects. Tests pass fakes; the app uses the real browser APIs. */
   alerts?: Alerts;
+  /** Where sessions and preferences are saved. Tests pass in-memory storage; the app uses localStorage. */
+  repository?: SipatRepository;
+  /** Only passed by tests, to make dates in the session log predictable. */
+  locale?: string;
 };
 
-export function Pomodoro({ initialSettings = DEFAULT_SETTINGS, alerts = browserAlerts }: Props) {
+export function Pomodoro({
+  initialSettings = DEFAULT_SETTINGS,
+  alerts = browserAlerts,
+  repository = browserRepository,
+  locale,
+}: Props) {
   const { state, remainingMs, start, pause, reset, skip, updateSettings } = usePomodoro(initialSettings);
   const { phase, timer, settings } = state;
   const status = timer.status;
@@ -63,8 +81,25 @@ export function Pomodoro({ initialSettings = DEFAULT_SETTINGS, alerts = browserA
   const [soundOn, setSoundOn] = useState(true);
   const [notifyOn, setNotifyOn] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<FocusSession[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [storageNotice, setStorageNotice] = useState<string | null>(null);
 
   useDocumentTitle(tabTitle(phase, status, display));
+
+  useStoredData(repository, ({ preferences, sessions: saved }) => {
+    if (preferences) {
+      updateSettings(preferences.settings);
+      setSoundOn(preferences.soundOn);
+    }
+    // Merge rather than replace, in case a session finished while loading.
+    setSessions((current) => mergeSessions(saved, current));
+    setLoaded(true);
+  });
+
+  function persistPreferences(preferences: Preferences) {
+    repository.savePreferences(preferences).catch(() => setStorageNotice(STORAGE_FAILED_NOTICE));
+  }
 
   useCompletionEffect(state.lastCompletion, (completion) => {
     if (soundOn) {
@@ -75,6 +110,18 @@ export function Pomodoro({ initialSettings = DEFAULT_SETTINGS, alerts = browserA
       // By now `phase` is already the *next* phase, which is exactly what the message announces.
       const { title, body } = completionMessage(completion.phase, phase, settings);
       if (!alerts.notify(title, body)) setNotice(NOTIFY_FAILED_NOTICE);
+    }
+
+    const session = sessionFromCompletion(completion);
+    if (session) {
+      // Show it straight away ("optimistic"), then replace the list with what storage actually
+      // holds, which may include sessions saved by another tab. If saving fails, the session
+      // stays visible for this visit and a notice explains.
+      setSessions((current) => mergeSessions(current, [session]));
+      repository.addSession(session).then(
+        (stored) => setSessions((current) => mergeSessions(stored, current)),
+        () => setStorageNotice(STORAGE_FAILED_NOTICE),
+      );
     }
   });
 
@@ -151,12 +198,23 @@ export function Pomodoro({ initialSettings = DEFAULT_SETTINGS, alerts = browserA
         </div>
       </section>
 
+      <SessionLog sessions={sessions} loaded={loaded} notice={storageNotice} locale={locale} />
+
       <SettingsPanel
+        // The form copies `settings` into its draft once, when it mounts. Changing the key after
+        // saved settings load gives it a fresh mount, so the fields show the saved values.
+        key={loaded ? "loaded" : "defaults"}
         settings={settings}
-        onSave={updateSettings}
+        onSave={(next) => {
+          updateSettings(next);
+          persistPreferences({ settings: next, soundOn });
+        }}
         phaseInProgress={status !== "idle"}
         soundOn={soundOn}
-        onSoundChange={setSoundOn}
+        onSoundChange={(on) => {
+          setSoundOn(on);
+          persistPreferences({ settings, soundOn: on });
+        }}
         notifyOn={notifyOn}
         onNotifyChange={handleNotifyChange}
         notice={notice}

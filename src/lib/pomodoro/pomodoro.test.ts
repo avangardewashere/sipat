@@ -52,7 +52,37 @@ describe("completing a phase", () => {
     // The tick arrives an hour late (laptop asleep), but finishedAt is still exact.
     const state = run(createPomodoro(DEFAULT_SETTINGS), { type: "start", now: T0 }, { type: "tick", now: T0 + 90 * MIN });
 
-    expect(state.lastCompletion).toEqual({ seq: 1, phase: "focus", durationMs: 25 * MIN, finishedAt: T0 + 25 * MIN });
+    expect(state.lastCompletion).toEqual({
+      seq: 1,
+      phase: "focus",
+      durationMs: 25 * MIN,
+      startedAt: T0,
+      finishedAt: T0 + 25 * MIN,
+    });
+  });
+
+  it("keeps the first start time through pauses, so a session's span includes its breaks", () => {
+    const state = run(
+      createPomodoro(DEFAULT_SETTINGS),
+      { type: "start", now: T0 },
+      { type: "pause", now: T0 + 10 * MIN },
+      { type: "start", now: T0 + 40 * MIN }, // resumed half an hour later
+      { type: "tick", now: T0 + 55 * MIN },
+    );
+
+    expect(state.lastCompletion).toMatchObject({ startedAt: T0, finishedAt: T0 + 55 * MIN, durationMs: 25 * MIN });
+  });
+
+  it("forgets the start time on reset, so the next start counts from then", () => {
+    const state = run(
+      createPomodoro(DEFAULT_SETTINGS),
+      { type: "start", now: T0 },
+      { type: "reset" },
+      { type: "start", now: T0 + 60 * MIN },
+      { type: "tick", now: T0 + 85 * MIN },
+    );
+
+    expect(state.lastCompletion).toMatchObject({ startedAt: T0 + 60 * MIN });
   });
 
   it("moves from a break back to focus", () => {
