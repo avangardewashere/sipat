@@ -3,11 +3,15 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Chart series color (one series, so one hue). Validated with the dataviz palette checker
+     against these exact backgrounds: lightness band, chroma and >= 3:1 contrast all pass. */
+  --chart-series: #2a78d6;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-chart-series: var(--chart-series);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -16,6 +20,8 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+    /* Its own step for dark mode, validated against #0a0a0a (not an automatic flip). */
+    --chart-series: #3987e5;
   }
 }
 

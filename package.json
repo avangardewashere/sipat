@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "jest",
     "test:watch": "jest --watch",
-    "typecheck": "next typegen && tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit",
+    "test:dst": "node scripts/test-in-timezone.mjs America/New_York --ci src/lib/stats/week.dst.test.ts"
   },
   "dependencies": {
     "next": "16.3.4",

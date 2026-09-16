@@ -21,4 +21,6 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test -- --ci
+      # The same date logic again, in a timezone with daylight saving (23- and 25-hour days).
+      - run: npm run test:dst
       - run: npm run build

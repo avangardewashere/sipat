@@ -583,6 +583,22 @@ describe("session log", () => {
   });
 });
 
+describe("weekly stats", () => {
+  it("count a focus session as soon as it finishes", async () => {
+    const { user } = await setup();
+    const stats = () => screen.getByRole("region", { name: "This week" });
+    const focusTime = () => within(stats()).getByText("Focus time").nextElementSibling;
+
+    expect(focusTime()).toHaveTextContent("0 min");
+
+    await user.click(button("Start"));
+    await passTime(25 * MIN);
+
+    expect(focusTime()).toHaveTextContent("25 min");
+    expect(within(stats()).getByText("Sessions").nextElementSibling).toHaveTextContent("1");
+  });
+});
+
 describe("after a page refresh", () => {
   it("still shows earlier sessions", async () => {
     const store = createMemoryStore();

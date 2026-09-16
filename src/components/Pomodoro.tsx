@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { SessionLog } from "@/components/SessionLog";
 import { SettingsPanel } from "@/components/SettingsPanel";
+import { WeeklyStats } from "@/components/WeeklyStats";
 import { useCompletionEffect } from "@/hooks/useCompletionEffect";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { usePomodoro } from "@/hooks/usePomodoro";
@@ -197,6 +198,10 @@ export function Pomodoro({
           </button>
         </div>
       </section>
+
+      {/* Rendered once saved sessions have loaded, so it's never computed from an empty list
+          or from the server's pre-render time. */}
+      {loaded && <WeeklyStats sessions={sessions} locale={locale} />}
 
       <SessionLog sessions={sessions} loaded={loaded} notice={storageNotice} locale={locale} />
 
