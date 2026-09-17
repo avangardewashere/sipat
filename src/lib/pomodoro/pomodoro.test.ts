@@ -11,6 +11,7 @@ import {
   type PomodoroAction,
   type PomodoroState,
 } from "./pomodoro";
+import type { SavedCycle } from "./savedCycle";
 import { DEFAULT_SETTINGS, type Phase } from "./settings";
 
 const SEC = 1_000;
@@ -240,6 +241,96 @@ describe("changing settings", () => {
     );
 
     expect(state.timer).toEqual({ status: "paused", durationMs: 25 * MIN, elapsedMs: 5 * MIN });
+  });
+});
+
+describe("restore", () => {
+  const saved = (overrides: Partial<SavedCycle> = {}): SavedCycle => ({
+    phase: "focus",
+    completedFocus: 2,
+    timer: { status: "running", durationMs: 25 * MIN, startedAt: T0, elapsedBeforeMs: 0 },
+    phaseStartedAt: T0,
+    ...overrides,
+  });
+
+  it("picks a running timer back up with the time that really passed", () => {
+    // Started at T0, page reopened 7 minutes later.
+    const state = pomodoroReducer(createPomodoro(DEFAULT_SETTINGS), { type: "restore", saved: saved(), now: T0 + 7 * MIN });
+
+    expect(state.timer.status).toBe("running");
+    expect(getRemainingMs(state.timer, T0 + 7 * MIN)).toBe(18 * MIN);
+    expect(state.completedFocus).toBe(2);
+    expect(sessionNumber(state)).toBe(3);
+  });
+
+  it("brings a paused timer back paused, exactly where it was", () => {
+    const paused = saved({ timer: { status: "paused", durationMs: 25 * MIN, elapsedMs: 10 * MIN } });
+
+    const state = pomodoroReducer(createPomodoro(DEFAULT_SETTINGS), { type: "restore", saved: paused, now: T0 + 999 * MIN });
+
+    expect(state.timer).toEqual({ status: "paused", durationMs: 25 * MIN, elapsedMs: 10 * MIN });
+  });
+
+  it("gives an idle phase the current settings' length, not the saved one", () => {
+    const idleBreak = saved({ phase: "shortBreak", timer: { status: "idle", durationMs: 5 * MIN }, phaseStartedAt: null });
+    const withLongerBreaks = createPomodoro({ ...DEFAULT_SETTINGS, shortBreakMin: 10 });
+
+    const state = pomodoroReducer(withLongerBreaks, { type: "restore", saved: idleBreak, now: T0 });
+
+    expect(state.phase).toBe("shortBreak");
+    expect(state.timer).toEqual({ status: "idle", durationMs: 10 * MIN });
+  });
+
+  it("keeps a running phase's original length even if settings changed", () => {
+    const state = pomodoroReducer(createPomodoro({ ...DEFAULT_SETTINGS, focusMin: 50 }), {
+      type: "restore",
+      saved: saved(),
+      now: T0 + MIN,
+    });
+
+    expect(state.timer.durationMs).toBe(25 * MIN);
+  });
+
+  it("completes a phase that ran out while the page was closed, with its real end time, marked as away", () => {
+    // Started 09:00, 25 minutes long, page reopened at 11:00.
+    const state = pomodoroReducer(createPomodoro(DEFAULT_SETTINGS), { type: "restore", saved: saved(), now: T0 + 120 * MIN });
+
+    expect(state.phase).toBe("shortBreak");
+    expect(state.timer.status).toBe("idle");
+    expect(state.completedFocus).toBe(3);
+    expect(state.lastCompletion).toEqual({
+      seq: 1,
+      phase: "focus",
+      durationMs: 25 * MIN,
+      startedAt: T0,
+      finishedAt: T0 + 25 * MIN,
+      whileAway: true,
+    });
+  });
+
+  it("gives a long break when the away completion was the 4th focus", () => {
+    const state = pomodoroReducer(createPomodoro(DEFAULT_SETTINGS), {
+      type: "restore",
+      saved: saved({ completedFocus: 3 }),
+      now: T0 + 60 * MIN,
+    });
+
+    expect(state.phase).toBe("longBreak");
+  });
+
+  it("does not mark completions that happen normally after a restore", () => {
+    let state = pomodoroReducer(createPomodoro(DEFAULT_SETTINGS), { type: "restore", saved: saved(), now: T0 + 5 * MIN });
+    state = pomodoroReducer(state, { type: "tick", now: T0 + 25 * MIN });
+
+    expect(state.lastCompletion?.whileAway).toBeUndefined();
+  });
+
+  it("keeps the current settings", () => {
+    const custom = { ...DEFAULT_SETTINGS, longBreakEvery: 3 };
+
+    const state = pomodoroReducer(createPomodoro(custom), { type: "restore", saved: saved(), now: T0 });
+
+    expect(state.settings).toBe(custom);
   });
 });
 

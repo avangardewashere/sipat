@@ -8,9 +8,10 @@ import { useCompletionEffect } from "@/hooks/useCompletionEffect";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePomodoro } from "@/hooks/usePomodoro";
+import { useSaveCycle } from "@/hooks/useSaveCycle";
 import { useStoredData } from "@/hooks/useStoredData";
 import { browserAlerts, type Alerts, type PermissionResult } from "@/lib/alerts/browser";
-import { completionMessage, filledDots, sessionNumber } from "@/lib/pomodoro/pomodoro";
+import { completionMessage, filledDots, sessionNumber, type PhaseCompletion } from "@/lib/pomodoro/pomodoro";
 import type { Preferences } from "@/lib/pomodoro/preferences";
 import { DEFAULT_SETTINGS, PHASE_LABEL, type Phase, type PomodoroSettings } from "@/lib/pomodoro/settings";
 import { mergeSessions, sessionFromCompletion, type FocusSession } from "@/lib/sessions/session";
@@ -49,6 +50,16 @@ const PERMISSION_NOTICE: Record<Exclude<PermissionResult, "granted">, string> = 
 const NOTIFY_FAILED_NOTICE =
   "This browser only shows notifications for installed apps, so you'll get sound and vibration instead.";
 
+/** "Your focus session finished at 10:25 while Sipat was closed…" */
+export function awayMessage(completion: PhaseCompletion, locale?: string): string {
+  const time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(
+    completion.finishedAt,
+  );
+  return completion.phase === "focus"
+    ? `Your focus session finished at ${time} while Sipat was closed. It's in your log.`
+    : `Your ${PHASE_LABEL[completion.phase].toLowerCase()} ended at ${time} while Sipat was closed.`;
+}
+
 const STORAGE_FAILED_NOTICE =
   "Couldn't save to this browser's storage (it may be full or blocked). New sessions and settings will be lost when you close this tab.";
 
@@ -74,7 +85,7 @@ export function Pomodoro({
   repository = browserRepository,
   locale,
 }: Props) {
-  const { state, remainingMs, start, pause, reset, skip, updateSettings } = usePomodoro(initialSettings);
+  const { state, remainingMs, start, pause, reset, skip, updateSettings, restore } = usePomodoro(initialSettings);
   const { phase, timer, settings } = state;
   const status = timer.status;
   const display = formatRemaining(remainingMs);
@@ -86,17 +97,26 @@ export function Pomodoro({
   const [sessions, setSessions] = useState<FocusSession[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [storageNotice, setStorageNotice] = useState<string | null>(null);
+  const [awayNotice, setAwayNotice] = useState<string | null>(null);
 
   useDocumentTitle(tabTitle(phase, status, display));
 
-  useStoredData(repository, ({ preferences, sessions: saved }) => {
+  useStoredData(repository, ({ preferences, sessions: saved, cycle }) => {
     if (preferences) {
       updateSettings(preferences.settings);
       setSoundOn(preferences.soundOn);
     }
+    // Order with the settings above doesn't matter: an idle phase always takes its length from the
+    // current settings, and a running or paused one keeps the length it started with.
+    if (cycle) restore(cycle);
     // Merge rather than replace, in case a session finished while loading.
     setSessions((current) => mergeSessions(saved, current));
     setLoaded(true);
+  });
+
+  // Only once loading is done; saving earlier would overwrite the timer that's about to be restored.
+  useSaveCycle(state, loaded, (cycle) => {
+    repository.saveCycle(cycle).catch(() => setStorageNotice(STORAGE_FAILED_NOTICE));
   });
 
   function persistPreferences(preferences: Preferences) {
@@ -104,11 +124,14 @@ export function Pomodoro({
   }
 
   useCompletionEffect(state.lastCompletion, (completion) => {
-    if (soundOn) {
+    if (completion.whileAway) {
+      // It ended while the page was closed: a chime now would be late and confusing. Say so instead.
+      setAwayNotice(awayMessage(completion, locale));
+    } else if (soundOn) {
       alerts.chime();
       alerts.vibrate();
     }
-    if (notifyOn) {
+    if (notifyOn && !completion.whileAway) {
       // By now `phase` is already the *next* phase, which is exactly what the message announces.
       const { title, body } = completionMessage(completion.phase, phase, settings);
       if (!alerts.notify(title, body)) setNotice(NOTIFY_FAILED_NOTICE);
@@ -130,6 +153,7 @@ export function Pomodoro({
   function handleStart() {
     // A click (or key press) is the moment browsers allow audio to be switched on for later.
     alerts.unlockSound();
+    setAwayNotice(null);
     start();
   }
 
@@ -245,6 +269,22 @@ export function Pomodoro({
             {isBreak ? "Skip break" : "Skip focus"}
           </button>
         </div>
+
+        {awayNotice && (
+          <div
+            role="status"
+            className="flex max-w-sm items-start gap-3 rounded-xl bg-foreground/5 px-4 py-3 text-left text-sm"
+          >
+            <p className="flex-1">{awayNotice}</p>
+            <button
+              type="button"
+              onClick={() => setAwayNotice(null)}
+              className="-my-2.5 h-11 shrink-0 rounded-full px-3 font-medium hover:bg-foreground/10"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Only shown where a mouse or trackpad suggests a keyboard is likely at hand. */}
         <p className="hidden text-xs text-foreground/50 [@media(pointer:fine)]:block">

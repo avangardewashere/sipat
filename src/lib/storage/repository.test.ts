@@ -172,6 +172,36 @@ describe("preferences", () => {
   });
 });
 
+describe("timer cycle", () => {
+  const cycle = {
+    phase: "focus" as const,
+    completedFocus: 1,
+    timer: { status: "running" as const, durationMs: 25 * MIN, startedAt: T0, elapsedBeforeMs: 0 },
+    phaseStartedAt: T0,
+  };
+
+  it("resolves null when nothing was saved", async () => {
+    await expect(createLocalRepository(createMemoryStore()).loadCycle()).resolves.toBeNull();
+  });
+
+  it("saves and loads the cycle (a page refresh)", async () => {
+    const store = createMemoryStore();
+    await createLocalRepository(store).saveCycle(cycle);
+
+    await expect(createLocalRepository(store).loadCycle()).resolves.toEqual(cycle);
+  });
+
+  it("starts fresh from unreadable timer data, without crashing", async () => {
+    const store = createMemoryStore({ [STORAGE_KEYS.cycle]: "{garbage" });
+
+    await expect(createLocalRepository(store).loadCycle()).resolves.toBeNull();
+  });
+
+  it("rejects with StorageWriteError when the browser won't save", async () => {
+    await expect(createLocalRepository(readOnlyStore()).saveCycle(cycle)).rejects.toBeInstanceOf(StorageWriteError);
+  });
+});
+
 describe("parsePreferences", () => {
   it.each([
     ["broken JSON", "{nope"],

@@ -14,6 +14,7 @@ import {
   serializePreferences,
   type Preferences,
 } from "@/lib/pomodoro/preferences";
+import { parseCycle, serializeCycle, type SavedCycle } from "@/lib/pomodoro/savedCycle";
 import {
   mergeSessions,
   parseSessions,
@@ -33,6 +34,9 @@ export type SipatRepository = {
   /** Resolves null when nothing has been saved yet. */
   loadPreferences(): Promise<Preferences | null>;
   savePreferences(preferences: Preferences): Promise<void>;
+  /** The timer and cycle position saved before a refresh, or null to start fresh. */
+  loadCycle(): Promise<SavedCycle | null>;
+  saveCycle(cycle: SavedCycle): Promise<void>;
 };
 
 /** Thrown (as a rejected Promise) when the browser refuses to store data. */
@@ -48,6 +52,7 @@ export const STORAGE_KEYS = {
   /** Where unreadable session data is copied before it gets overwritten. */
   sessionsBackup: "sipat:v1:sessions:backup",
   preferences: "sipat:v1:preferences",
+  cycle: "sipat:v1:cycle",
 } as const;
 
 export function createLocalRepository(store: KeyValueStore): SipatRepository {
@@ -103,6 +108,16 @@ export function createLocalRepository(store: KeyValueStore): SipatRepository {
     async savePreferences(preferences) {
       if (!store.set(STORAGE_KEYS.preferences, serializePreferences(preferences))) {
         throw new StorageWriteError("preferences");
+      }
+    },
+
+    async loadCycle() {
+      return parseCycle(store.get(STORAGE_KEYS.cycle));
+    },
+
+    async saveCycle(cycle) {
+      if (!store.set(STORAGE_KEYS.cycle, serializeCycle(cycle))) {
+        throw new StorageWriteError("the timer");
       }
     },
   };

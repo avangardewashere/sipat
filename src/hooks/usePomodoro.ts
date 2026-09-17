@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useReducer, useState } from "react";
 import { createPomodoro, pomodoroReducer, type PomodoroState } from "@/lib/pomodoro/pomodoro";
+import type { SavedCycle } from "@/lib/pomodoro/savedCycle";
 import type { PomodoroSettings } from "@/lib/pomodoro/settings";
 import { getRemainingMs } from "@/lib/timer/timer";
 
@@ -20,6 +21,8 @@ export type UsePomodoro = {
   reset: () => void;
   skip: () => void;
   updateSettings: (settings: PomodoroSettings) => void;
+  /** Put back a cycle saved before a refresh, as of right now. */
+  restore: (saved: SavedCycle) => void;
 };
 
 /**
@@ -79,6 +82,14 @@ export function usePomodoro(
     (settings: PomodoroSettings) => dispatch({ type: "updateSettings", settings }),
     [],
   );
+  const restore = useCallback(
+    (saved: SavedCycle) => {
+      const t = clock();
+      setNow(t);
+      dispatch({ type: "restore", saved, now: t });
+    },
+    [clock],
+  );
 
-  return { state, remainingMs: getRemainingMs(state.timer, now), start, pause, reset, skip, updateSettings };
+  return { state, remainingMs: getRemainingMs(state.timer, now), start, pause, reset, skip, updateSettings, restore };
 }

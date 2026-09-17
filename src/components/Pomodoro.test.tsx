@@ -728,6 +728,147 @@ describe("weekly stats", () => {
   });
 });
 
+describe("resuming the timer after a refresh", () => {
+  /** Unmount (close the page), let time pass while it's closed, then open it again on the same storage. */
+  async function refreshAfter(first: { unmount: () => void; store: KeyValueStore }, closedForMs: number, options: SetupOptions = {}) {
+    first.unmount();
+    jest.setSystemTime(Date.now() + closedForMs);
+    return setup({ store: first.store, ...options });
+  }
+
+  it("picks a running timer back up, counting the time the page was closed", async () => {
+    const first = await setup();
+    await first.user.click(button("Start"));
+    await passTime(5 * MIN);
+
+    await refreshAfter(first, 2 * MIN);
+
+    expect(display()).toHaveTextContent("18:00");
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    await passTime(1 * MIN);
+    expect(display()).toHaveTextContent("17:00"); // and it keeps counting
+  });
+
+  it("brings a paused timer back paused, however long it was closed", async () => {
+    const first = await setup();
+    await first.user.click(button("Start"));
+    await passTime(5 * MIN);
+    await first.user.click(button("Pause"));
+
+    await refreshAfter(first, 3 * 60 * MIN);
+
+    expect(display()).toHaveTextContent("20:00");
+    expect(button("Resume")).toBeInTheDocument();
+  });
+
+  it("keeps the cycle position and a skipped phase", async () => {
+    const first = await setup();
+    await first.user.click(button("Skip focus"));
+
+    await refreshAfter(first, 1 * MIN);
+
+    expect(phaseHeading()).toHaveTextContent("Short break");
+    expect(display()).toHaveTextContent("05:00");
+  });
+
+  describe("when time ran out while the page was closed", () => {
+    it("logs the focus session with its real times, silently, and says what happened", async () => {
+      const first = await setup();
+      await first.user.click(button("Start")); // 09:00
+
+      const second = await refreshAfter(first, 40 * MIN); // reopened 09:40
+
+      expect(phaseHeading()).toHaveTextContent("Short break");
+      expect(screen.getByText("1 of 4 sessions done")).toBeInTheDocument();
+      expect(within(sessionLog()).getByRole("listitem")).toHaveTextContent("09:00–09:25");
+      expect(screen.getByText("Your focus session finished at 09:25 while Sipat was closed. It's in your log.")).toBeInTheDocument();
+      expect(second.alerts.chime).not.toHaveBeenCalled();
+      expect(second.alerts.vibrate).not.toHaveBeenCalled();
+    });
+
+    it("doesn't log it twice or repeat the notice on the next refresh", async () => {
+      const first = await setup();
+      await first.user.click(button("Start"));
+      const second = await refreshAfter(first, 40 * MIN);
+
+      await refreshAfter(second, 1 * MIN);
+
+      expect(within(sessionLog()).getAllByRole("listitem")).toHaveLength(1);
+      expect(screen.queryByText(/while Sipat was closed/)).not.toBeInTheDocument();
+    });
+
+    it("mentions a break that ended, without logging it", async () => {
+      const first = await setup();
+      await first.user.click(button("Skip focus"));
+      await first.user.click(button("Start")); // 5-minute break from 09:00
+
+      await refreshAfter(first, 30 * MIN);
+
+      expect(phaseHeading()).toHaveTextContent("Focus");
+      expect(screen.getByText("Your short break ended at 09:05 while Sipat was closed.")).toBeInTheDocument();
+      expect(within(sessionLog()).getByText(/No focus sessions yet/)).toBeInTheDocument();
+    });
+
+    it("hides the notice when dismissed", async () => {
+      const first = await setup();
+      await first.user.click(button("Start"));
+      const second = await refreshAfter(first, 40 * MIN);
+
+      await second.user.click(button("Dismiss"));
+
+      expect(screen.queryByText(/while Sipat was closed/)).not.toBeInTheDocument();
+    });
+
+    it("hides the notice when you start the next phase", async () => {
+      const first = await setup();
+      await first.user.click(button("Start"));
+      const second = await refreshAfter(first, 40 * MIN);
+      expect(screen.getByText(/while Sipat was closed/)).toBeInTheDocument();
+
+      await second.user.click(button("Start")); // starts the break
+
+      expect(screen.queryByText(/while Sipat was closed/)).not.toBeInTheDocument();
+    });
+  });
+
+  it("never overwrites the saved timer before it has been loaded", async () => {
+    // Save a running timer, then open the page with a repository whose loading is held back.
+    const store = createMemoryStore();
+    const realRepository = createLocalRepository(store);
+    await realRepository.saveCycle({
+      phase: "focus",
+      completedFocus: 0,
+      timer: { status: "running", durationMs: 25 * MIN, startedAt: Date.now(), elapsedBeforeMs: 0 },
+      phaseStartedAt: Date.now(),
+    });
+    const savedBefore = store.get(STORAGE_KEYS.cycle);
+
+    let releaseLoad!: () => void;
+    const gate = new Promise<void>((resolve) => (releaseLoad = resolve));
+    const slowRepository = {
+      ...realRepository,
+      loadCycle: async () => {
+        await gate;
+        return realRepository.loadCycle();
+      },
+    };
+    render(<Pomodoro alerts={fakeAlerts()} repository={slowRepository} locale="en-US" />);
+    await act(async () => {}); // let every mount effect run while loading is still held back
+
+    expect(store.get(STORAGE_KEYS.cycle)).toBe(savedBefore);
+
+    await act(async () => releaseLoad());
+    await waitFor(() => expect(screen.getByText("Running")).toBeInTheDocument());
+  });
+
+  it("starts fresh if the saved timer is unreadable", async () => {
+    await setup({ store: createMemoryStore({ [STORAGE_KEYS.cycle]: "{garbage" }) });
+
+    expect(display()).toHaveTextContent("25:00");
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+  });
+});
+
 describe("after a page refresh", () => {
   it("still shows earlier sessions", async () => {
     const store = createMemoryStore();

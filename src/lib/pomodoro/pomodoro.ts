@@ -7,6 +7,7 @@
  */
 
 import { createTimer, timerReducer, type TimerState } from "@/lib/timer/timer";
+import type { SavedCycle } from "./savedCycle";
 import { phaseDurationMs, type Phase, type PomodoroSettings } from "./settings";
 
 /** Recorded whenever a phase runs all the way to zero (skipping doesn't count). */
@@ -19,6 +20,8 @@ export type PhaseCompletion = {
   startedAt: number;
   /** The real moment time ran out (see Block 1). */
   finishedAt: number;
+  /** True when time ran out while Sipat was closed, noticed only when it was reopened. */
+  whileAway?: boolean;
 };
 
 export type PomodoroState = {
@@ -38,7 +41,9 @@ export type PomodoroAction =
   | { type: "tick"; now: number }
   | { type: "reset" }
   | { type: "skip" }
-  | { type: "updateSettings"; settings: PomodoroSettings };
+  | { type: "updateSettings"; settings: PomodoroSettings }
+  /** Put back a cycle saved before a refresh. `now` is when the page reopened. */
+  | { type: "restore"; saved: SavedCycle; now: number };
 
 export function createPomodoro(settings: PomodoroSettings): PomodoroState {
   return {
@@ -113,6 +118,29 @@ export function pomodoroReducer(state: PomodoroState, action: PomodoroAction): P
       const timer =
         state.timer.status === "idle" ? createTimer(phaseDurationMs(state.phase, settings)) : state.timer;
       return { ...state, settings, timer };
+    }
+
+    case "restore": {
+      const { saved, now } = action;
+      // A phase that hadn't started takes its length from the *current* settings, like any idle
+      // phase. A running or paused one keeps the length it started with.
+      const timer =
+        saved.timer.status === "idle" ? createTimer(phaseDurationMs(saved.phase, state.settings)) : saved.timer;
+      const restored: PomodoroState = {
+        ...state,
+        phase: saved.phase,
+        completedFocus: saved.completedFocus,
+        timer,
+        phaseStartedAt: timer.status === "idle" ? null : saved.phaseStartedAt,
+      };
+
+      // One tick at "now" lets the engine decide if time ran out while the page was closed.
+      // If it did, the phase completes with its real end time, marked as having happened away.
+      const caughtUp = pomodoroReducer(restored, { type: "tick", now });
+      if (caughtUp.lastCompletion && caughtUp.lastCompletion !== restored.lastCompletion) {
+        return { ...caughtUp, lastCompletion: { ...caughtUp.lastCompletion, whileAway: true } };
+      }
+      return caughtUp;
     }
 
     default: {
