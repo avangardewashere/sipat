@@ -91,6 +91,63 @@ describe("sessions", () => {
   });
 });
 
+describe("deleting sessions", () => {
+  it("removes one session and resolves with what's left", async () => {
+    const store = createMemoryStore();
+    const repo = createLocalRepository(store);
+    await repo.addSession(session(T0));
+    await repo.addSession(session(T0 + 60 * MIN));
+
+    await expect(repo.deleteSession(session(T0).id)).resolves.toEqual([session(T0 + 60 * MIN)]);
+    await expect(createLocalRepository(store).loadSessions()).resolves.toEqual([session(T0 + 60 * MIN)]);
+  });
+
+  it("does nothing for an id that isn't there", async () => {
+    const repo = createLocalRepository(createMemoryStore());
+    await repo.addSession(session(T0));
+
+    await expect(repo.deleteSession("focus-missing")).resolves.toEqual([session(T0)]);
+  });
+
+  it("keeps a session another tab saved in the meantime", async () => {
+    const store = createMemoryStore();
+    const tabA = createLocalRepository(store);
+    const tabB = createLocalRepository(store);
+    await tabA.addSession(session(T0));
+
+    await tabB.addSession(session(T0 + 60 * MIN)); // saved elsewhere…
+    const result = await tabA.deleteSession(session(T0).id); // …before this tab deletes
+
+    expect(result).toEqual([session(T0 + 60 * MIN)]);
+  });
+
+  it("can be undone by adding the same session back", async () => {
+    const repo = createLocalRepository(createMemoryStore());
+    await repo.addSession(session(T0));
+    await repo.deleteSession(session(T0).id);
+
+    await expect(repo.addSession(session(T0))).resolves.toEqual([session(T0)]);
+  });
+
+  it("clears every session, leaving a readable empty log", async () => {
+    const store = createMemoryStore();
+    const repo = createLocalRepository(store);
+    await repo.addSession(session(T0));
+
+    await repo.clearSessions();
+
+    await expect(repo.loadSessions()).resolves.toEqual([]);
+    expect(JSON.parse(store.get(STORAGE_KEYS.sessions) ?? "null")).toEqual({ version: 1, sessions: [] });
+  });
+
+  it("rejects with StorageWriteError when the browser won't save", async () => {
+    const repo = createLocalRepository(readOnlyStore({ [STORAGE_KEYS.sessions]: serializeSessions([session(T0)]) }));
+
+    await expect(repo.deleteSession(session(T0).id)).rejects.toBeInstanceOf(StorageWriteError);
+    await expect(repo.clearSessions()).rejects.toBeInstanceOf(StorageWriteError);
+  });
+});
+
 describe("preferences", () => {
   it("resolves null when nothing was ever saved", async () => {
     await expect(createLocalRepository(createMemoryStore()).loadPreferences()).resolves.toBeNull();

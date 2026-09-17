@@ -26,6 +26,10 @@ export type SipatRepository = {
   loadSessions(): Promise<FocusSession[]>;
   /** Saves one session and resolves with the full, up-to-date list. */
   addSession(session: FocusSession): Promise<FocusSession[]>;
+  /** Removes one session by id and resolves with the full, up-to-date list. */
+  deleteSession(id: string): Promise<FocusSession[]>;
+  /** Removes every session. */
+  clearSessions(): Promise<void>;
   /** Resolves null when nothing has been saved yet. */
   loadPreferences(): Promise<Preferences | null>;
   savePreferences(preferences: Preferences): Promise<void>;
@@ -71,6 +75,25 @@ export function createLocalRepository(store: KeyValueStore): SipatRepository {
         throw new StorageWriteError("session");
       }
       return next;
+    },
+
+    async deleteSession(id) {
+      // Same rule as addSession: read fresh, so another tab's new sessions survive this write.
+      const current = readSessions();
+      const next = current.filter((s) => s.id !== id);
+      if (next.length === current.length) return current; // already gone
+
+      if (!store.set(STORAGE_KEYS.sessions, serializeSessions(next))) {
+        throw new StorageWriteError("the change");
+      }
+      return next;
+    },
+
+    async clearSessions() {
+      // Writes an empty (versioned) log rather than deleting the key, so the format stays recognisable.
+      if (!store.set(STORAGE_KEYS.sessions, serializeSessions([]))) {
+        throw new StorageWriteError("the change");
+      }
     },
 
     async loadPreferences() {

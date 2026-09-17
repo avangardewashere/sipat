@@ -19,6 +19,10 @@ const config: Config = {
   // jsdom gives tests a fake browser (document, window) so React can render.
   testEnvironment: "jsdom",
   setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
+  // Jest's default is 5 s per test. Under heavy load (many test files at once, a slow CI machine)
+  // a long component test once went past that and failed for no real reason. A flaky red run
+  // teaches people to ignore red, so allow more time. A genuinely stuck test still fails.
+  testTimeout: 20_000,
   // Mirrors the "@/*" alias in tsconfig.json.
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",

@@ -6,6 +6,7 @@ import { SettingsPanel } from "@/components/SettingsPanel";
 import { WeeklyStats } from "@/components/WeeklyStats";
 import { useCompletionEffect } from "@/hooks/useCompletionEffect";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePomodoro } from "@/hooks/usePomodoro";
 import { useStoredData } from "@/hooks/useStoredData";
 import { browserAlerts, type Alerts, type PermissionResult } from "@/lib/alerts/browser";
@@ -127,9 +128,50 @@ export function Pomodoro({
   });
 
   function handleStart() {
-    // A click is the moment browsers allow audio to be switched on for later.
+    // A click (or key press) is the moment browsers allow audio to be switched on for later.
     alerts.unlockSound();
     start();
+  }
+
+  useKeyboardShortcuts((action) => {
+    if (action === "toggle") {
+      if (status === "running") pause();
+      else handleStart();
+    } else if (action === "reset") {
+      reset();
+    } else {
+      skip();
+    }
+  });
+
+  const [lastDeleted, setLastDeleted] = useState<FocusSession | null>(null);
+
+  function handleDelete(id: string) {
+    setLastDeleted(sessions.find((s) => s.id === id) ?? null);
+    setSessions((current) => current.filter((s) => s.id !== id));
+    repository.deleteSession(id).then(
+      // Storage may hold sessions from another tab; keep those, but not the deleted one.
+      (stored) => setSessions((current) => mergeSessions(stored, current.filter((s) => s.id !== id))),
+      () => setStorageNotice(STORAGE_FAILED_NOTICE),
+    );
+  }
+
+  function handleUndoDelete() {
+    if (!lastDeleted) return;
+    const restored = lastDeleted;
+    setLastDeleted(null);
+    setSessions((current) => mergeSessions(current, [restored]));
+    // Same id as before, so this puts back exactly the session that was removed.
+    repository.addSession(restored).then(
+      (stored) => setSessions((current) => mergeSessions(stored, current)),
+      () => setStorageNotice(STORAGE_FAILED_NOTICE),
+    );
+  }
+
+  function handleClearAll() {
+    setLastDeleted(null);
+    setSessions([]);
+    repository.clearSessions().catch(() => setStorageNotice(STORAGE_FAILED_NOTICE));
   }
 
   async function handleNotifyChange(on: boolean) {
@@ -182,28 +224,49 @@ export function Pomodoro({
 
         <div className="flex flex-wrap justify-center gap-3">
           {status === "running" ? (
-            <button type="button" className={primaryButton} onClick={pause}>
+            <button type="button" className={primaryButton} onClick={pause} aria-keyshortcuts="Space">
               Pause
             </button>
           ) : (
-            <button type="button" className={primaryButton} onClick={handleStart}>
+            <button type="button" className={primaryButton} onClick={handleStart} aria-keyshortcuts="Space">
               {status === "paused" ? "Resume" : "Start"}
             </button>
           )}
-          <button type="button" className={secondaryButton} onClick={reset} disabled={status === "idle"}>
+          <button
+            type="button"
+            className={secondaryButton}
+            onClick={reset}
+            disabled={status === "idle"}
+            aria-keyshortcuts="R"
+          >
             Reset
           </button>
-          <button type="button" className={secondaryButton} onClick={skip}>
+          <button type="button" className={secondaryButton} onClick={skip} aria-keyshortcuts="S">
             {isBreak ? "Skip break" : "Skip focus"}
           </button>
         </div>
+
+        {/* Only shown where a mouse or trackpad suggests a keyboard is likely at hand. */}
+        <p className="hidden text-xs text-foreground/50 [@media(pointer:fine)]:block">
+          Shortcuts: <kbd className="font-sans font-medium">Space</kbd> start/pause ·{" "}
+          <kbd className="font-sans font-medium">R</kbd> reset · <kbd className="font-sans font-medium">S</kbd> skip
+        </p>
       </section>
 
       {/* Rendered once saved sessions have loaded, so it's never computed from an empty list
           or from the server's pre-render time. */}
       {loaded && <WeeklyStats sessions={sessions} locale={locale} />}
 
-      <SessionLog sessions={sessions} loaded={loaded} notice={storageNotice} locale={locale} />
+      <SessionLog
+        sessions={sessions}
+        loaded={loaded}
+        notice={storageNotice}
+        lastDeleted={lastDeleted}
+        onDelete={handleDelete}
+        onUndoDelete={handleUndoDelete}
+        onClearAll={handleClearAll}
+        locale={locale}
+      />
 
       <SettingsPanel
         // The form copies `settings` into its draft once, when it mounts. Changing the key after

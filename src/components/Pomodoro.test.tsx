@@ -583,6 +583,135 @@ describe("session log", () => {
   });
 });
 
+describe("keyboard shortcuts", () => {
+  /** Presses a key with nothing in particular focused, as if the user had just clicked the page. */
+  async function pressOnPage(user: ReturnType<typeof userEvent.setup>, key: string) {
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    await user.keyboard(key);
+  }
+
+  it("Space starts, pauses and resumes", async () => {
+    const { user } = await setup();
+
+    await pressOnPage(user, " ");
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    await passTime(1 * MIN);
+
+    await pressOnPage(user, " ");
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(display()).toHaveTextContent("24:00");
+
+    await pressOnPage(user, " ");
+    expect(screen.getByText("Running")).toBeInTheDocument();
+  });
+
+  it("Space on a focused Pause button pauses once, not pause-then-resume", async () => {
+    const { user } = await setup();
+    await user.click(button("Start")); // focus is now on the Start/Pause button
+
+    await user.keyboard(" ");
+
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+  });
+
+  it("R resets and S skips", async () => {
+    const { user } = await setup();
+    await pressOnPage(user, " ");
+    await passTime(3 * MIN);
+
+    await pressOnPage(user, "r");
+    expect(display()).toHaveTextContent("25:00");
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+
+    await pressOnPage(user, "s");
+    expect(phaseHeading()).toHaveTextContent("Short break");
+  });
+
+  it("don't fire while typing in a settings field", async () => {
+    const { user } = await setup();
+    await openSettings(user);
+
+    await user.click(screen.getByRole("spinbutton", { name: /^Focus/ }));
+    await user.keyboard(" rs");
+
+    expect(phaseHeading()).toHaveTextContent("Focus");
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+  });
+
+  it("leave Ctrl+R to the browser", async () => {
+    const { user } = await setup();
+    await pressOnPage(user, " ");
+    await passTime(1 * MIN);
+
+    await pressOnPage(user, "{Control>}r{/Control}");
+
+    expect(display()).toHaveTextContent("24:00"); // not reset
+  });
+});
+
+describe("deleting sessions", () => {
+  async function completeFocus(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(button("Start"));
+    await passTime(1 * MIN); // focus
+    await user.click(button("Skip break"));
+  }
+  const quick = { ...DEFAULT_SETTINGS, focusMin: 1 };
+
+  it("deletes one session, from the screen and from storage", async () => {
+    const { user, store } = await setup({ settings: quick });
+    await completeFocus(user);
+    await completeFocus(user);
+
+    await user.click(within(sessionLog()).getByRole("button", { name: /Delete session Mon, Sep 14, 09:00–09:01/ }));
+    await passTime(0); // let the save finish
+
+    expect(within(sessionLog()).getAllByRole("listitem")).toHaveLength(1);
+    expect(JSON.parse(store.get(STORAGE_KEYS.sessions) ?? "null").sessions).toHaveLength(1);
+  });
+
+  it("can undo a delete", async () => {
+    const { user, store } = await setup({ settings: quick });
+    await completeFocus(user);
+
+    await user.click(within(sessionLog()).getByRole("button", { name: /Delete session/ }));
+    await passTime(0);
+    expect(within(sessionLog()).getByRole("status")).toHaveTextContent("Session deleted.");
+
+    await user.click(within(sessionLog()).getByRole("button", { name: "Undo" }));
+    await passTime(0);
+
+    expect(within(sessionLog()).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(sessionLog()).queryByRole("status")).not.toBeInTheDocument();
+    expect(JSON.parse(store.get(STORAGE_KEYS.sessions) ?? "null").sessions).toHaveLength(1);
+  });
+
+  it("asks before clearing all history, and Cancel keeps everything", async () => {
+    const { user } = await setup({ settings: quick });
+    await completeFocus(user);
+    await completeFocus(user);
+
+    await user.click(button("Clear history"));
+    expect(within(sessionLog()).getByText(/Delete all 2 sessions\? This can't be undone\./)).toBeInTheDocument();
+
+    await user.click(button("Cancel"));
+    expect(within(sessionLog()).getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("clears all history once confirmed, and the weekly stats follow", async () => {
+    const { user, store } = await setup({ settings: quick });
+    await completeFocus(user);
+
+    await user.click(button("Clear history"));
+    await user.click(button("Delete all"));
+    await passTime(0);
+
+    expect(within(sessionLog()).getByText(/No focus sessions yet/)).toBeInTheDocument();
+    expect(JSON.parse(store.get(STORAGE_KEYS.sessions) ?? "null")).toEqual({ version: 1, sessions: [] });
+    const stats = screen.getByRole("region", { name: "This week" });
+    expect(within(stats).getByText("Focus time").nextElementSibling).toHaveTextContent("0 min");
+  });
+});
+
 describe("weekly stats", () => {
   it("count a focus session as soon as it finishes", async () => {
     const { user } = await setup();

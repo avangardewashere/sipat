@@ -33,7 +33,7 @@ understand every step along the way.
 
 ## Blocks
 
-**Progress:** Block 0 ✅ (live at https://sipat-jade.vercel.app) · Block 1 ✅ ([notes](blocks/block-1.md)) · Block 2 ✅ ([notes](blocks/block-2.md)) · Block 3 ✅ ([notes](blocks/block-3.md)) · Block 4 ✅ ([notes](blocks/block-4.md)) · Block 5 ✅ ([notes](blocks/block-5.md))
+**Progress:** Block 0 ✅ (live at https://sipat-jade.vercel.app) · Block 1 ✅ ([notes](blocks/block-1.md)) · Block 2 ✅ ([notes](blocks/block-2.md)) · Block 3 ✅ ([notes](blocks/block-3.md)) · Block 4 ✅ ([notes](blocks/block-4.md)) · Block 5 ✅ ([notes](blocks/block-5.md)) · Block 6 ✅ ([notes](blocks/block-6.md)) · **v0.1.0 shipped**
 
 | # | Block | What we build | What you learn | How Jest checks it |
 |---|---|---|---|---|
